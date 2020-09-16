@@ -34,7 +34,7 @@ Output ToOutput(OutputTensor output_tensor) {
 
 std::vector<Output> ToOutputVector(
     const std::vector<OutputTensor>& output_tensors) {
-  size_t n = output_tensors.size();
+  const int n = output_tensors.size();
   std::vector<Output> result;
   result.reserve(n);
   for (int i = 0; i < n; ++i) result.push_back(ToOutput(output_tensors[i]));
@@ -72,9 +72,9 @@ Status AddForwardLoopCounter(WhileContext* while_ctx, const Scope& scope,
   };
 
   // Body function that adds one to input.
-  BodyGraphBuilderFn body_fn = [while_ctx](const Scope& scope,
-                                           const std::vector<Output>& inputs,
-                                           std::vector<Output>* outputs) {
+  BodyGraphBuilderFn body_fn = [](const Scope& scope,
+                                  const std::vector<Output>& inputs,
+                                  std::vector<Output>* outputs) {
     DCHECK_EQ(inputs.size(), 1);
     outputs->emplace_back(ops::Add(scope, inputs[0], 1));
     return scope.status();

@@ -51,6 +51,14 @@ class ExpiringLRUCache {
     InsertLocked(key, value);
   }
 
+  // Delete the entry with key `key`. Return true if the entry was found for
+  // `key`, false if the entry was not found. In both cases, there is no entry
+  // with key `key` existed after the call.
+  bool Delete(const string& key) {
+    mutex_lock lock(mu_);
+    return DeleteLocked(key);
+  }
+
   /// Look up the entry with key `key` and copy it to `value` if found. Returns
   /// true if an entry was found for `key`, and its timestamp is not more than
   /// max_age_ seconds in the past.
@@ -88,6 +96,13 @@ class ExpiringLRUCache {
     return s;
   }
 
+  /// Clear the cache.
+  void Clear() {
+    mutex_lock lock(mu_);
+    cache_.clear();
+    lru_list_.clear();
+  }
+
   /// Accessors for cache parameters.
   uint64 max_age() const { return max_age_; }
   size_t max_entries() const { return max_entries_; }
@@ -104,7 +119,8 @@ class ExpiringLRUCache {
     std::list<string>::iterator lru_iterator;
   };
 
-  bool LookupLocked(const string& key, T* value) EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  bool LookupLocked(const string& key, T* value)
+      TF_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
     auto it = cache_.find(key);
     if (it == cache_.end()) {
       return false;
@@ -121,7 +137,7 @@ class ExpiringLRUCache {
   }
 
   void InsertLocked(const string& key, const T& value)
-      EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+      TF_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
     lru_list_.push_front(key);
     Entry entry{env_->NowSeconds(), value, lru_list_.begin()};
     auto insert = cache_.insert(std::make_pair(key, entry));
@@ -132,6 +148,16 @@ class ExpiringLRUCache {
       cache_.erase(lru_list_.back());
       lru_list_.pop_back();
     }
+  }
+
+  bool DeleteLocked(const string& key) TF_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    auto it = cache_.find(key);
+    if (it == cache_.end()) {
+      return false;
+    }
+    lru_list_.erase(it->second.lru_iterator);
+    cache_.erase(it);
+    return true;
   }
 
   /// The maximum age of entries in the cache, in seconds. A value of 0 means
@@ -149,11 +175,11 @@ class ExpiringLRUCache {
   mutex mu_;
 
   /// The cache (a map from string key to Entry).
-  std::map<string, Entry> cache_ GUARDED_BY(mu_);
+  std::map<string, Entry> cache_ TF_GUARDED_BY(mu_);
 
   /// The LRU list of entries. The front of the list identifies the most
   /// recently accessed entry.
-  std::list<string> lru_list_ GUARDED_BY(mu_);
+  std::list<string> lru_list_ TF_GUARDED_BY(mu_);
 };
 
 }  // namespace tensorflow

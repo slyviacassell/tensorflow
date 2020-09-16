@@ -22,11 +22,11 @@ limitations under the License.
 
 #define GEMMLOWP_ALLOW_SLOW_SCALAR_FALLBACK
 #include "public/gemmlowp.h"
+#include "tensorflow/core/framework/kernel_shape_util.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/kernels/conv_ops.h"
 #include "tensorflow/core/kernels/meta_support.h"
-#include "tensorflow/core/kernels/ops_util.h"
 #include "tensorflow/core/kernels/quantization_utils.h"
 #include "tensorflow/core/kernels/reference_gemm.h"
 #include "tensorflow/core/lib/core/errors.h"
@@ -268,13 +268,19 @@ class Im2ColConvFunctor {
     Im2ColBufferResource<T1, chunk_value_count>* im2col_buffer_resource;
     std::function<Status(Im2ColBufferResource<T1, chunk_value_count>**)>
         creator = [](Im2ColBufferResource<T1, chunk_value_count>** resource) {
+#ifdef _MSC_VER
+          // MSVC complains about the capture of chunk_value_count which oddly
+          // works fine in conv_ops_using_gemm.cc for example.
+          // Define chunk_value_count inside the lambda for now.
+          const int64 chunk_value_count =
+              (kMaxChunkSize + (sizeof(T1) - 1)) / sizeof(T1);
+#endif
           *resource = new Im2ColBufferResource<T1, chunk_value_count>();
           return Status::OK();
         };
-    OP_REQUIRES_OK(
-        context,
-        context->resource_manager()->LookupOrCreate(
-            "Conv2d", "im2col_buffer", &im2col_buffer_resource, creator));
+    OP_REQUIRES_OK(context, context->resource_manager()->LookupOrCreate(
+                                "Conv2d", "im2col_buffer",
+                                &im2col_buffer_resource, creator));
     // This means that multiple ops can't be run simultaneously on different
     // threads, because we have a single shared resource. The platforms this is
     // aimed at have intra-op parallelism as their focus though, so it shouldn't

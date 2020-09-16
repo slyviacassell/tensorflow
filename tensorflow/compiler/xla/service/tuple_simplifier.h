@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <utility>
 
+#include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 
@@ -25,15 +26,36 @@ namespace xla {
 
 // A pass which simplifies patterns of Tuple and GetTupleElement instructions in
 // the module.
-class TupleSimplifier : public HloPassInterface {
+class TupleSimplifier : public HloModulePass {
  public:
-  TupleSimplifier() {}
+  TupleSimplifier() : TupleSimplifier(/*exclude_entry_computation=*/false) {}
+  explicit TupleSimplifier(bool exclude_entry_computation);
   ~TupleSimplifier() override {}
-  tensorflow::StringPiece name() const override { return "tuple-simplifier"; }
+  absl::string_view name() const override { return "tuple-simplifier"; }
 
   // Run tuple simplification on the given computation. Returns whether the
   // computation was changed.
   StatusOr<bool> Run(HloModule* module) override;
+
+ private:
+  // When set, this pipeline stage will perform optimization of all computations
+  // apart from the module's entry computation. This is used by Graphcore's
+  // backend.
+  bool exclude_entry_computation_;
+
+  // Collapse the following structure into just 'Tuple-shaped Op':
+  //
+  //   Tuple-shaped Op
+  //         |
+  //   +-----+-----+
+  //   |     |     |
+  //  GTE   GTE   GTE
+  //   |     |     |
+  //   +-----+-----+
+  //         |
+  //       Tuple
+  //
+  StatusOr<bool> RemoveWholeTuple(HloInstruction* tuple);
 };
 
 }  // namespace xla

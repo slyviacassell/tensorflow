@@ -18,14 +18,14 @@ limitations under the License.
 
 #include <unordered_map>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/types/span.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
 #include "tensorflow/compiler/xla/map_util.h"
 #include "tensorflow/compiler/xla/service/buffer_assignment.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/alias_analysis.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/ir_array.h"
-#include "tensorflow/core/lib/gtl/array_slice.h"
 
 namespace xla {
 namespace gpu {
@@ -36,22 +36,20 @@ class HloToIrBindings {
  public:
   HloToIrBindings(const HloModule& module,
                   const BufferAssignment* buffer_assignment,
-                  llvm::IRBuilder<>* ir_builder, llvm::Module* llvm_module,
+                  llvm::IRBuilder<>* b, llvm::Module* llvm_module,
                   bool is_nested)
       : buffer_assignment_(buffer_assignment),
         is_nested_(is_nested),
-        ir_builder_(ir_builder),
-        module_(llvm_module),
-        alias_analysis_(module, *buffer_assignment_,
-                        &ir_builder_->getContext()) {}
+        b_(b),
+        module_(llvm_module) {}
 
   void EmitBasePointersForHlos(
-      tensorflow::gtl::ArraySlice<const HloInstruction*> io_hlos,
-      tensorflow::gtl::ArraySlice<const HloInstruction*> non_io_hlos);
+      absl::Span<const HloInstruction* const> io_hlos,
+      absl::Span<const HloInstruction* const> non_io_hlos);
 
   // Rebinds the given HLO to the LLVM IR value that represent its address.
   void BindHloToIrValue(const HloInstruction& hlo, llvm::Value* ir_value,
-                        const ShapeIndex& shape_index = {});
+                        ShapeIndexView shape_index = {});
 
   // Unbinds all IR values that's defined in an LLVM function, e.g., function
   // arguments and stack variables. Global variables will be kept in bindings_.
@@ -62,17 +60,18 @@ class HloToIrBindings {
 
   // Returns whether `hlo` is bound to an LLVM IR value.
   bool BoundToIrValue(const HloInstruction& hlo) const {
-    return base_ptrs_.count(&hlo);
+    return base_ptrs_.contains(&hlo);
   }
 
   llvm::Value* GetTempBufferBase() const { return temp_buffer_base_; }
+  void SetTempBufferBase(llvm::Value* v) { temp_buffer_base_ = v; }
 
   // A helper method that returns the base pointer of the IrArray containing the
   // output of "inst".at the given ShapeIndex.
   llvm::Value* GetBasePointer(const HloInstruction& hlo,
-                              const ShapeIndex& shape_index = {}) const {
+                              ShapeIndexView shape_index = {}) const {
     auto it = base_ptrs_.find(&hlo);
-    CHECK(it != base_ptrs_.end());
+    CHECK(it != base_ptrs_.end()) << hlo.ToString();
     return it->second.element(shape_index);
   }
 
@@ -87,6 +86,8 @@ class HloToIrBindings {
                               const HloInstruction& consumer,
                               const ShapeIndex& shape_index = {});
 
+  string ToString() const;
+
  private:
   // Emits IR to resolve (possibly) recursive GetTupleElement instructions.
   llvm::Value* EmitGetTupleElement(const HloInstruction* gte,
@@ -94,27 +95,30 @@ class HloToIrBindings {
 
   // Returns an llvm typed ir representation of 'ir_value' based on 'hlo' shape.
   llvm::Value* GetTypedIrValue(const HloInstruction& hlo,
-                               const ShapeIndex& shape_index,
+                               ShapeIndexView shape_index,
                                llvm::Value* ir_value);
 
   const BufferAssignment* buffer_assignment_;
 
   const bool is_nested_;
 
-  llvm::IRBuilder<>* ir_builder_;
+  llvm::IRBuilder<>* b_;
   llvm::Module* module_;
 
   // Stores the underlying llvm::IrArray for each HloInstruction.
   // For an instruction that generates multiple outputs, the root will be a
   // tuple shape. The IrArray for each element output is stored in the subnode
   // in the ShapeTree.
-  std::unordered_map<const HloInstruction*, ShapeTree<llvm::Value*>> base_ptrs_;
+  absl::flat_hash_map<const HloInstruction*, ShapeTree<llvm::Value*>>
+      base_ptrs_;
 
   // The address of the memory block that contains all temporary buffers.
-  llvm::Value* temp_buffer_base_;
-
-  llvm_ir::AliasAnalysis alias_analysis_;
+  llvm::Value* temp_buffer_base_ = nullptr;
 };
+
+// Converts `ir_value` with type i8* to a typed LLVM Value* based on `shape`.
+llvm::Value* CastToTypedValue(const Shape& shape, llvm::Value* ir_value,
+                              llvm::IRBuilder<>* b);
 
 }  // namespace gpu
 }  // namespace xla

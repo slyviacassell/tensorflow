@@ -17,6 +17,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_GRAPPLER_COSTS_VIRTUAL_PLACER_H_
 
 #include <unordered_map>
+
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/protobuf/device_properties.pb.h"
 
@@ -29,7 +30,8 @@ class Cluster;
 // The virtual placer emulates the behavior of the TF placer.
 class VirtualPlacer {
  public:
-  VirtualPlacer(const Cluster* cluster);
+  explicit VirtualPlacer(
+      const std::unordered_map<string, DeviceProperties>& devices);
 
   const DeviceProperties& get_device(const NodeDef& node) const;
 
@@ -41,7 +43,7 @@ class VirtualPlacer {
  private:
   // Converts given device name to Lowercase Fully-Qualified Name (LFQN) string.
   // This helps us disambiguate device names internally and simplify matching.
-  // If device_name couldn't be parsed succesfully, returns empty string.
+  // If device_name couldn't be parsed successfully, returns empty string.
   string to_lfqn_or_empty(const string& device_name) const;
 
   // Map based on the cluster info: cluster device name -> device properties.

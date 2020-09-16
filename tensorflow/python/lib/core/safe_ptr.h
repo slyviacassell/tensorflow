@@ -13,21 +13,19 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef THIRD_PARTY_TENSORFLOW_PYTHON_LIB_CORE_SAFE_PTR_H_
-#define THIRD_PARTY_TENSORFLOW_PYTHON_LIB_CORE_SAFE_PTR_H_
+#ifndef TENSORFLOW_PYTHON_LIB_CORE_SAFE_PTR_H_
+#define TENSORFLOW_PYTHON_LIB_CORE_SAFE_PTR_H_
+
+#include <Python.h>
 
 #include <memory>
 
-#include <Python.h>
 #include "tensorflow/c/c_api.h"
 #include "tensorflow/c/eager/c_api.h"
+#include "tensorflow/python/lib/core/safe_pyobject_ptr.h"
 
 namespace tensorflow {
 namespace detail {
-
-struct PyDecrefDeleter {
-  void operator()(PyObject* p) const { Py_DECREF(p); }
-};
 
 struct TFTensorDeleter {
   void operator()(TF_Tensor* p) const { TF_DeleteTensor(p); }
@@ -41,12 +39,11 @@ struct TFStatusDeleter {
   void operator()(TF_Status* p) const { TF_DeleteStatus(p); }
 };
 
-}  // namespace detail
+struct TFBufferDeleter {
+  void operator()(TF_Buffer* p) const { TF_DeleteBuffer(p); }
+};
 
-// Safe container for an owned PyObject. On destruction, the reference count of
-// the contained object will be decremented.
-using Safe_PyObjectPtr = std::unique_ptr<PyObject, detail::PyDecrefDeleter>;
-Safe_PyObjectPtr make_safe(PyObject* o);
+}  // namespace detail
 
 // Safe containers for an owned TF_Tensor. On destruction, the tensor will be
 // deleted by TF_DeleteTensor.
@@ -64,6 +61,11 @@ Safe_TFE_TensorHandlePtr make_safe(TFE_TensorHandle* handle);
 using Safe_TF_StatusPtr = std::unique_ptr<TF_Status, detail::TFStatusDeleter>;
 Safe_TF_StatusPtr make_safe(TF_Status* status);
 
+// Safe containers for an owned TF_Buffer. On destruction, the handle
+// will be deleted by TF_DeleteBuffer.
+using Safe_TF_BufferPtr = std::unique_ptr<TF_Buffer, detail::TFBufferDeleter>;
+Safe_TF_BufferPtr make_safe(TF_Buffer* buffer);
+
 }  // namespace tensorflow
 
-#endif  // THIRD_PARTY_TENSORFLOW_PYTHON_LIB_CORE_SAFE_PTR_H_
+#endif  // TENSORFLOW_PYTHON_LIB_CORE_SAFE_PTR_H_

@@ -23,8 +23,7 @@ bool CountAsAcceleratorTime(const string& device) {
   return device.find("stream:all") != device.npos;
 }
 bool CountAsCPUTime(const string& device) {
-  return RE2::FullMatch(device,
-                        ".*/(device:gpu|gpu|device:cpu|cpu|device:sycl):\\d+");
+  return RE2::FullMatch(device, ".*/(device:gpu|gpu|device:cpu|cpu):\\d+");
 }
 bool IsCanonicalDevice(const string& device) { return CountAsCPUTime(device); }
 
@@ -80,10 +79,15 @@ void ExecStep::AddTimeStats(const string& dev, const NodeExecStats& step_stat) {
 
 void ExecStep::AddMemoryStats(const string& dev,
                               const NodeExecStats& step_stat) {
-  if (exec_.memory_intialized()) {
+  ExecMemory exec_mem;
+  if (step_stat.all_start_micros() > 0) {
+    exec_mem.set_memory_micros(step_stat.all_start_micros() +
+                               step_stat.op_end_rel_micros());
+  } else {
+    absl::FPrintF(stderr, "%s has no start time, skipping\n",
+                  step_stat.node_name());
     return;
   }
-  exec_.set_memory_intialized(true);
 
   int accelerator_allocator_cnt = 0;
   for (const auto& mem : step_stat.memory()) {
@@ -93,18 +97,16 @@ void ExecStep::AddMemoryStats(const string& dev,
       continue;
     }
     ++accelerator_allocator_cnt;
-    exec_.set_allocator_bytes_in_use(
-        std::max(static_cast<int64>(exec_.allocator_bytes_in_use()),
+    exec_mem.set_allocator_bytes_in_use(
+        std::max(static_cast<int64>(exec_mem.allocator_bytes_in_use()),
                  static_cast<int64>(mem.allocator_bytes_in_use())));
-    Allocation allocation;
     for (const auto& alloc : mem.allocation_records()) {
-      allocation.add_allocation_records()->MergeFrom(alloc);
+      allocations_.push_back(alloc);
     }
-    allocations_.push_back(allocation);
   }
   if (accelerator_allocator_cnt > 1) {
-    fprintf(stderr, "found %d gpu allocator for 1 node\n",
-            accelerator_allocator_cnt);
+    absl::FPrintF(stderr, "found %d gpu allocator for 1 node\n",
+                  accelerator_allocator_cnt);
   }
 
   int64 total_output_bytes = 0;
@@ -121,29 +123,36 @@ void ExecStep::AddMemoryStats(const string& dev,
       uint64 output_ptr =
           output.tensor_description().allocation_description().ptr();
       total_output_bytes += output_bytes;
-      output_memory_[output.slot()] = std::make_pair(output_bytes, output_ptr);
+
+      auto& mem = (*exec_mem.mutable_output_memory())[output.slot()];
+      mem.set_ptr(output_ptr);
+      mem.set_bytes(output_bytes);
     }
   }
-  exec_.set_output_bytes(total_output_bytes);
+  exec_mem.set_output_bytes(total_output_bytes);
 
   if (step_stat.has_memory_stats()) {
-    exec_.set_host_temp_bytes(exec_.host_temp_bytes() +
-                              step_stat.memory_stats().host_temp_memory_size());
-    exec_.set_host_persistent_bytes(
-        exec_.host_persistent_bytes() +
-        step_stat.memory_stats().host_persistent_memory_size());
-    exec_.set_accelerator_temp_bytes(
-        exec_.accelerator_temp_bytes() +
-        step_stat.memory_stats().device_temp_memory_size());
-    exec_.set_accelerator_persistent_bytes(
-        exec_.accelerator_persistent_bytes() +
-        step_stat.memory_stats().device_persistent_memory_size());
+    if (IsPlacedOnCPU(dev)) {
+      // Currently we assume ops placed on gpu only allocate memory on gpu.
+      exec_mem.set_host_temp_bytes(exec_mem.host_temp_bytes() +
+                                   step_stat.memory_stats().temp_memory_size());
+      exec_mem.set_host_persistent_bytes(
+          exec_mem.host_persistent_bytes() +
+          step_stat.memory_stats().persistent_memory_size());
+    } else {
+      exec_mem.set_accelerator_temp_bytes(
+          exec_mem.accelerator_temp_bytes() +
+          step_stat.memory_stats().temp_memory_size());
+      exec_mem.set_accelerator_persistent_bytes(
+          exec_mem.accelerator_persistent_bytes() +
+          step_stat.memory_stats().persistent_memory_size());
+    }
   }
 
   // TODO(xpan): Make this more accurate:
-  // High level: Memory tracking is suspicous and requires large scale
+  // High level: Memory tracking is suspicious and requires large scale
   // clean up.
-  // Investigte the memory usage difference between CPU/GPU with OpViewTest.
+  // Investigate the memory usage difference between CPU/GPU with OpViewTest.
   //
   // 1. OpKernelConstruction::allocate_xxx is not traced. Below, we only
   //    discuss OpKernelContext-related allocations.
@@ -166,23 +175,25 @@ void ExecStep::AddMemoryStats(const string& dev,
     requested_bytes += mem.total_bytes();
     peak_bytes += mem.peak_bytes();
   }
-  residual_bytes +=
-      exec_.host_persistent_bytes() + exec_.accelerator_persistent_bytes();
-  requested_bytes += exec_.host_persistent_bytes() +
-                     exec_.accelerator_persistent_bytes() +
-                     exec_.host_temp_bytes() + exec_.accelerator_temp_bytes();
-  peak_bytes += exec_.host_persistent_bytes() +
-                exec_.accelerator_persistent_bytes() + exec_.host_temp_bytes() +
-                exec_.accelerator_temp_bytes();
+  residual_bytes += exec_mem.host_persistent_bytes() +
+                    exec_mem.accelerator_persistent_bytes();
+  requested_bytes += exec_mem.host_persistent_bytes() +
+                     exec_mem.accelerator_persistent_bytes() +
+                     exec_mem.host_temp_bytes() +
+                     exec_mem.accelerator_temp_bytes();
+  peak_bytes += exec_mem.host_persistent_bytes() +
+                exec_mem.accelerator_persistent_bytes() +
+                exec_mem.host_temp_bytes() + exec_mem.accelerator_temp_bytes();
 
-  exec_.set_requested_bytes(requested_bytes);
-  exec_.set_residual_bytes(residual_bytes);
-  exec_.set_peak_bytes(peak_bytes);
+  exec_mem.set_requested_bytes(requested_bytes);
+  exec_mem.set_residual_bytes(residual_bytes);
+  exec_mem.set_peak_bytes(peak_bytes);
+  memory_execs_.emplace_back(exec_mem);
 }
 
 void TFGraphNode::AddStepStat(int64 step, const string& device,
                               const NodeExecStats& step_stat) {
-  string dev = str_util::Lowercase(device);
+  string dev = absl::AsciiStrToLower(device);
 
   // TODO(xpan): Make this more robust?
   // See run_metadata_test.py
@@ -198,11 +209,7 @@ void TFGraphNode::AddStepStat(int64 step, const string& device,
     } else {
       node_.set_canonical_device(dev);
       // TODO(xpan): Support things other than gpu?
-      if (dev.find("sycl") != dev.npos) {
-        node_.set_host_device(StringReplace(dev, "device:sycl:\\d+", "cpu:0"));
-      } else {
-        node_.set_host_device(StringReplace(dev, "gpu:\\d+", "cpu:0"));
-      }
+      node_.set_host_device(StringReplace(dev, "gpu:\\d+", "cpu:0"));
       AddOpType(node_.canonical_device());
     }
   }
@@ -276,8 +283,10 @@ TensorShapeProto VecToShapeProto(const std::vector<int64>& shape_vec) {
 }
 
 bool IsPlacedOnAccelerator(const string& device) {
-  return device.find("gpu") != device.npos ||
-         device.find("sycl") != device.npos;
+  return device.find("gpu") != device.npos;
+}
+bool IsPlacedOnCPU(const string& device) {
+  return device.find("cpu") != device.npos;
 }
 }  // namespace tfprof
 }  // namespace tensorflow

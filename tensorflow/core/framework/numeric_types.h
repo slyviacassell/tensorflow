@@ -13,11 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef TENSORFLOW_FRAMEWORK_NUMERIC_TYPES_H_
-#define TENSORFLOW_FRAMEWORK_NUMERIC_TYPES_H_
+#ifndef TENSORFLOW_CORE_FRAMEWORK_NUMERIC_TYPES_H_
+#define TENSORFLOW_CORE_FRAMEWORK_NUMERIC_TYPES_H_
 
 #include <complex>
-
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 // Disable clang-format to prevent 'FixedPoint' header from being included
 // before 'Tensor' header on which it depends.
@@ -41,152 +40,42 @@ typedef Eigen::QInt32 qint32;
 typedef Eigen::QInt16 qint16;
 typedef Eigen::QUInt16 quint16;
 
-// see framework/bfloat16.h for description.
-struct bfloat16 {
-  EIGEN_DEVICE_FUNC bfloat16() {}
+}  // namespace tensorflow
 
-  EIGEN_DEVICE_FUNC explicit bfloat16(const float v) {
-    if (Eigen::numext::isnan(v)) {
-      value = NAN_VALUE;
-      return;
-    }
-    const uint16_t* p = reinterpret_cast<const uint16_t*>(&v);
+static inline tensorflow::bfloat16 FloatToBFloat16(float float_val) {
 #if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    value = p[0];
+  return *reinterpret_cast<tensorflow::bfloat16*>(
+      reinterpret_cast<uint16_t*>(&float_val));
 #else
-    value = p[1];
+  return *reinterpret_cast<tensorflow::bfloat16*>(
+      &(reinterpret_cast<uint16_t*>(&float_val)[1]));
 #endif
-  }
-
-  template <class T>
-  explicit EIGEN_DEVICE_FUNC bfloat16(const T& val)
-      : bfloat16(static_cast<float>(val)) {}
-
-  EIGEN_DEVICE_FUNC explicit operator float() const {
-    float result;
-
-    uint16_t* q = reinterpret_cast<uint16_t*>(&result);
-
-#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
-    q[0] = value;
-    q[1] = 0;
-#else
-    q[0] = 0;
-    q[1] = value;
-#endif
-    return result;
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator bool() const {
-    return static_cast<bool>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator Eigen::half() const {
-    return static_cast<Eigen::half>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator short() const {
-    return static_cast<short>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator int() const {
-    return static_cast<int>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator long() const {
-    return static_cast<long>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator char() const {
-    return static_cast<char>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator signed char() const {
-    return static_cast<signed char>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator unsigned char() const {
-    return static_cast<unsigned char>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator unsigned int() const {
-    return static_cast<unsigned int>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator unsigned long() const {
-    return static_cast<unsigned long>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator unsigned long long() const {
-    return static_cast<unsigned long long>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator long long() const {
-    return static_cast<long long>(float(*this));
-  }
-
-  EIGEN_DEVICE_FUNC explicit operator double() const {
-    return static_cast<double>(float(*this));
-  }
-
-  static bfloat16 epsilon() {
-    bfloat16 x;
-    x.value = 0x3c00;  // 0x1.0p-7
-    return x;
-  }
-
-  uint16_t value;
-
-  // A value that represents "not a number".
-  static const uint16_t NAN_VALUE = 0x7FC0;
-};
-
-inline bfloat16 operator+(bfloat16 a, bfloat16 b) {
-  return bfloat16(static_cast<float>(a) + static_cast<float>(b));
 }
-inline bfloat16 operator-(bfloat16 a, bfloat16 b) {
-  return bfloat16(static_cast<float>(a) - static_cast<float>(b));
-}
-inline bfloat16 operator*(bfloat16 a, bfloat16 b) {
-  return bfloat16(static_cast<float>(a) * static_cast<float>(b));
-}
-inline bfloat16 operator/(bfloat16 a, bfloat16 b) {
-  return bfloat16(static_cast<float>(a) / static_cast<float>(b));
-}
-inline bfloat16 operator-(bfloat16 a) {
-  a.value ^= 0x8000;
-  return a;
-}
-inline bool operator<(bfloat16 a, bfloat16 b) {
-  return static_cast<float>(a) < static_cast<float>(b);
-}
-inline bool operator<=(bfloat16 a, bfloat16 b) {
-  return static_cast<float>(a) <= static_cast<float>(b);
-}
-inline bool operator==(bfloat16 a, bfloat16 b) {
-  return static_cast<float>(a) == static_cast<float>(b);
-}
-inline bool operator!=(bfloat16 a, bfloat16 b) {
-  return static_cast<float>(a) != static_cast<float>(b);
-}
-inline bool operator>(bfloat16 a, bfloat16 b) {
-  return static_cast<float>(a) > static_cast<float>(b);
-}
-inline bool operator>=(bfloat16 a, bfloat16 b) {
-  return static_cast<float>(a) >= static_cast<float>(b);
-}
-
-}  // end namespace tensorflow
 
 namespace Eigen {
 template <>
-struct NumTraits<tensorflow::bfloat16> : GenericNumTraits<uint16_t> {};
+struct NumTraits<tensorflow::tstring> : GenericNumTraits<tensorflow::tstring> {
+  enum {
+    RequireInitialization = 1,
+    ReadCost = HugeCost,
+    AddCost = HugeCost,
+    MulCost = HugeCost
+  };
 
-using ::tensorflow::operator==;
-using ::tensorflow::operator!=;
+  static inline int digits10() { return 0; }
+
+ private:
+  static inline tensorflow::tstring epsilon();
+  static inline tensorflow::tstring dummy_precision();
+  static inline tensorflow::tstring lowest();
+  static inline tensorflow::tstring highest();
+  static inline tensorflow::tstring infinity();
+  static inline tensorflow::tstring quiet_NaN();
+};
+
 }  // namespace Eigen
 
-#ifdef COMPILER_MSVC
+#if defined(_MSC_VER) && !defined(__clang__)
 namespace std {
 template <>
 struct hash<Eigen::half> {
@@ -194,7 +83,14 @@ struct hash<Eigen::half> {
     return static_cast<std::size_t>(a.x);
   }
 };
-}  // namespace std
-#endif  // COMPILER_MSVC
 
-#endif  // TENSORFLOW_FRAMEWORK_NUMERIC_TYPES_H_
+template <>
+struct hash<Eigen::bfloat16> {
+  std::size_t operator()(const Eigen::bfloat16& a) const {
+    return hash<float>()(static_cast<float>(a));
+  }
+};
+}  // namespace std
+#endif  // _MSC_VER
+
+#endif  // TENSORFLOW_CORE_FRAMEWORK_NUMERIC_TYPES_H_

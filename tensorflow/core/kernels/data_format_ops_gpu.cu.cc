@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#if GOOGLE_CUDA
+#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
 
 #define EIGEN_USE_GPU
 
@@ -25,7 +25,9 @@ namespace tensorflow {
 typedef Eigen::GpuDevice GPUDevice;
 template struct functor::DataFormatDimMap<GPUDevice, int32>;
 template struct functor::DataFormatDimMap<GPUDevice, int64>;
+template struct functor::DataFormatVecPermute<GPUDevice, int32>;
+template struct functor::DataFormatVecPermute<GPUDevice, int64>;
 
 }  // namespace tensorflow
 
-#endif  // GOOGLE_CUDA
+#endif  // GOOGLE_CUDA || TENSORFLOW_USE_ROCM

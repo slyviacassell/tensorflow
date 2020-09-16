@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #include "tensorflow/core/platform/env.h"
+#include "tensorflow/core/platform/null_file_system.h"
 
 namespace tensorflow {
 
@@ -38,12 +39,14 @@ class TestRandomAccessFile : public RandomAccessFile {
 class TestFileSystem : public NullFileSystem {
  public:
   Status NewRandomAccessFile(
-      const string& fname, std::unique_ptr<RandomAccessFile>* result) override {
+      const string& fname, TransactionToken* token,
+      std::unique_ptr<RandomAccessFile>* result) override {
     result->reset(new TestRandomAccessFile);
     return Status::OK();
   }
   // Always return size of 10
-  Status GetFileSize(const string& fname, uint64* file_size) override {
+  Status GetFileSize(const string& fname, TransactionToken* token,
+                     uint64* file_size) override {
     *file_size = 10;
     return Status::OK();
   }
